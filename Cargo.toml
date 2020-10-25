@@ -1,0 +1,20 @@
+[package]
+name = "rtrb"
+version = "0.0.0"
+authors = [
+    "Stjepan Glavina <stjepang@gmail.com>",
+    "Matthias Geier <Matthias.Geier@gmail.com>",
+]
+categories = []
+keywords = []
+description = ""
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mgeier/rtrb"
+edition = "2018"
+
+[dependencies]
+cache-padded = "1.1"
+
+[dev-dependencies]
+crossbeam-utils = "0.8"
+rand = "0.7.3"
