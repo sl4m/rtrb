@@ -453,7 +453,12 @@ impl<T> Consumer<T> {
             Ok(head) => head,
             Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
         };
-        let first_len = self.rb.capacity.min(head + n);
+        let buffer_remainder = if head < self.rb.capacity {
+            self.rb.capacity - head
+        } else {
+            2 * self.rb.capacity - head
+        };
+        let first_len = n.min(buffer_remainder);
         let first_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) };
         let second_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(0), n - first_len) };
         Ok((first_slice, second_slice))
