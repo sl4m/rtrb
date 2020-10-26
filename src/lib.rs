@@ -89,7 +89,7 @@ impl<T> RingBuffer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (mut p, mut c) = RingBuffer::new(100).split();
+    /// let (mut p, c) = RingBuffer::new(100).split();
     /// assert!(p.try_push(0.0f32).is_ok());
     /// ```
     pub fn new(capacity: usize) -> RingBuffer<T> {
@@ -118,7 +118,7 @@ impl<T> RingBuffer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (mut p, mut c) = RingBuffer::<f32>::new(100).split();
+    /// let (p, c) = RingBuffer::<f32>::new(100).split();
     /// ```
     pub fn split(self) -> (Producer<T>, Consumer<T>) {
         let rb = Arc::new(self);
@@ -220,7 +220,7 @@ impl<T> Drop for RingBuffer<T> {
 /// ```
 /// use rtrb::RingBuffer;
 ///
-/// let (mut producer, mut consumer) = RingBuffer::<f32>::new(1000).split();
+/// let (producer, consumer) = RingBuffer::<f32>::new(1000).split();
 /// ```
 pub struct Producer<T> {
     /// The inner representation of the queue.
@@ -249,7 +249,7 @@ impl<T> Producer<T> {
     /// ```
     /// use rtrb::{RingBuffer, PushError};
     ///
-    /// let (mut p, mut c) = RingBuffer::new(1).split();
+    /// let (mut p, c) = RingBuffer::new(1).split();
     ///
     /// assert_eq!(p.try_push(10), Ok(()));
     /// assert_eq!(p.try_push(20), Err(PushError::Full(20)));
@@ -312,7 +312,7 @@ impl<T> Producer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (mut p, mut c) = RingBuffer::<f32>::new(100).split();
+    /// let (p, c) = RingBuffer::<f32>::new(100).split();
     /// assert_eq!(p.capacity(), 100);
     /// ```
     pub fn capacity(&self) -> usize {
@@ -357,7 +357,7 @@ impl<T> fmt::Debug for Producer<T> {
 /// ```
 /// use rtrb::RingBuffer;
 ///
-/// let (mut producer, mut consumer) = RingBuffer::<f32>::new(1000).split();
+/// let (producer, consumer) = RingBuffer::<f32>::new(1000).split();
 /// ```
 pub struct Consumer<T> {
     /// The inner representation of the queue.
@@ -438,7 +438,7 @@ impl<T> Consumer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (mut p, mut c) = RingBuffer::<f32>::new(100).split();
+    /// let (p, c) = RingBuffer::<f32>::new(100).split();
     /// assert_eq!(c.capacity(), 100);
     /// ```
     pub fn capacity(&self) -> usize {
