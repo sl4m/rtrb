@@ -256,9 +256,9 @@ impl<T> Producer<T> {
     /// ```
     pub fn try_push(&mut self, value: T) -> Result<(), PushError<T>> {
         if let Some(tail) = self.get_tail(1) {
-        unsafe {
-            self.rb.slot(tail).write(value);
-        }
+            unsafe {
+                self.rb.slot(tail).write(value);
+            }
             self.advance_tail(tail, 1);
             Ok(())
         } else {
@@ -284,7 +284,7 @@ impl<T> Producer<T> {
         Some(tail)
     }
 
-    fn advance_tail(&mut self, tail: usize, n:usize) {
+    fn advance_tail(&mut self, tail: usize, n: usize) {
         let tail = self.rb.increment(tail, n);
         self.rb.tail.store(tail, Ordering::Release);
         self.tail.set(tail);
