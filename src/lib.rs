@@ -266,6 +266,7 @@ impl<T> Producer<T> {
         }
     }
 
+<<<<<<< HEAD
     fn get_tail(&mut self, n: usize) -> Option<usize> {
         let head = self.head.get();
         let tail = self.tail.get();
@@ -317,6 +318,25 @@ impl<T> Producer<T> {
     /// ```
     pub fn capacity(&self) -> usize {
         self.rb.capacity
+    }
+
+    fn get_tail(&mut self, n: usize) -> Option<usize> {
+        // Check if the queue has *possibly* not enough slots.
+        if self.rb.distance(self.head, self.tail) + n > self.rb.capacity {
+            // Refresh the head ...
+            self.head = self.rb.head.load(Ordering::Acquire);
+            // ... and check if there *really* are not enough slots.
+            if self.rb.distance(self.head, self.tail) + n > self.rb.capacity {
+                return None;
+            }
+        }
+        Some(self.tail)
+    }
+
+    fn advance_tail(&mut self, tail: usize, n: usize) {
+        let tail = self.rb.increment(tail, n);
+        self.rb.tail.store(tail, Ordering::Release);
+        self.tail = tail;
     }
 }
 
