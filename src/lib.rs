@@ -429,15 +429,34 @@ impl<T> Consumer<T> {
     ///
     /// `c.as_slices(c.slots())` never fails.
     /// `c.as_slices(0)` never fails (but is quite useless).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtrb::{RingBuffer, SlicesError};
+    ///
+    /// let (mut p, mut c) = RingBuffer::new(2).split();
+    ///
+    /// assert_eq!(c.as_slices(1), Err(SlicesError::TooFewSlots(0)));
+    /// assert_eq!(p.try_push(10), Ok(()));
+    /// assert_eq!(c.as_slices(99), Err(SlicesError::TooFewSlots(1)));
+    /// assert_eq!(p.try_push(20), Ok(()));
+    /// assert_eq!(c.as_slices(2), Ok(([10, 20].as_ref(), [].as_ref())));
+    /// // TODO: use c.advance(1):
+    /// assert_eq!(c.try_pop(), Ok(10));
+    /// assert_eq!(p.try_push(30), Ok(()));
+    /// assert_eq!(c.as_slices(2), Ok(([20].as_ref(), [30].as_ref())));
+    /// assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
+    /// ```
     pub fn as_slices(&self, n: usize) -> Result<(&[T], &[T]), SlicesError> {
-        let _head = match self.get_head(n) {
+        let head = match self.get_head(n) {
             Ok(head) => head,
             Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
         };
-
-        // TODO: create slices
-
-        unimplemented!();
+        let first_len = self.rb.capacity.min(head + n);
+        let first_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) };
+        let second_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(0), n - first_len) };
+        Ok((first_slice, second_slice))
     }
 
     /// Returns the capacity of the queue.
