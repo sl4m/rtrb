@@ -20,13 +20,13 @@
 //!
 //! let (p, c) = RingBuffer::new(2).split();
 //!
-//! assert!(p.push(1).is_ok());
-//! assert!(p.push(2).is_ok());
-//! assert!(p.push(3).is_err());
+//! assert!(p.try_push(1).is_ok());
+//! assert!(p.try_push(2).is_ok());
+//! assert!(p.try_push(3).is_err());
 //!
-//! assert_eq!(c.pop(), Ok(1));
-//! assert_eq!(c.pop(), Ok(2));
-//! assert!(c.pop().is_err());
+//! assert_eq!(c.try_pop(), Ok(1));
+//! assert_eq!(c.try_pop(), Ok(2));
+//! assert!(c.try_pop().is_err());
 //! ```
 
 #![warn(rust_2018_idioms)]
@@ -90,7 +90,7 @@ impl<T> RingBuffer<T> {
     /// use rtrb::RingBuffer;
     ///
     /// let (p, c) = RingBuffer::new(100).split();
-    /// assert!(p.push(0.0f32).is_ok());
+    /// assert!(p.try_push(0.0f32).is_ok());
     /// ```
     pub fn new(capacity: usize) -> RingBuffer<T> {
         assert!(capacity > 0, "capacity must be non-zero");
@@ -250,10 +250,10 @@ impl<T> Producer<T> {
     ///
     /// let (p, c) = RingBuffer::new(1).split();
     ///
-    /// assert_eq!(p.push(10), Ok(()));
-    /// assert_eq!(p.push(20), Err(PushError::Full(20)));
+    /// assert_eq!(p.try_push(10), Ok(()));
+    /// assert_eq!(p.try_push(20), Err(PushError::Full(20)));
     /// ```
-    pub fn push(&self, value: T) -> Result<(), PushError<T>> {
+    pub fn try_push(&self, value: T) -> Result<(), PushError<T>> {
         let mut head = self.head.get();
         let mut tail = self.tail.get();
 
@@ -354,10 +354,10 @@ impl<T> Consumer<T> {
     /// assert_eq!(c.try_pop(), Ok(10));
     /// assert_eq!(c.try_pop(), Err(PopError::Empty));
     ///
-    /// assert_eq!(p.push(20), Ok(()));
-    /// assert_eq!(c.pop().ok(), Some(20));
+    /// assert_eq!(p.try_push(20), Ok(()));
+    /// assert_eq!(c.try_pop().ok(), Some(20));
     /// ```
-    pub fn pop(&self) -> Result<T, PopError> {
+    pub fn try_pop(&self) -> Result<T, PopError> {
         let mut head = self.head.get();
         let mut tail = self.tail.get();
 

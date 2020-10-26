@@ -9,12 +9,12 @@ use rtrb::RingBuffer;
 fn smoke() {
     let (p, c) = RingBuffer::new(1).split();
 
-    p.push(7).unwrap();
-    assert_eq!(c.pop(), Ok(7));
+    p.try_push(7).unwrap();
+    assert_eq!(c.try_pop(), Ok(7));
 
-    p.push(8).unwrap();
-    assert_eq!(c.pop(), Ok(8));
-    assert!(c.pop().is_err());
+    p.try_push(8).unwrap();
+    assert_eq!(c.try_pop(), Ok(8));
+    assert!(c.try_pop().is_err());
 }
 
 #[test]
@@ -42,18 +42,18 @@ fn parallel() {
         s.spawn(move |_| {
             for i in 0..COUNT {
                 loop {
-                    if let Ok(x) = c.pop() {
+                    if let Ok(x) = c.try_pop() {
                         assert_eq!(x, i);
                         break;
                     }
                 }
             }
-            assert!(c.pop().is_err());
+            assert!(c.try_pop().is_err());
         });
 
         s.spawn(move |_| {
             for i in 0..COUNT {
-                while p.push(i).is_err() {}
+                while p.try_push(i).is_err() {}
             }
         });
     })
@@ -87,13 +87,13 @@ fn drops() {
         let p = scope(|s| {
             s.spawn(move |_| {
                 for _ in 0..steps {
-                    while c.pop().is_err() {}
+                    while c.try_pop().is_err() {}
                 }
             });
 
             s.spawn(move |_| {
                 for _ in 0..steps {
-                    while p.push(DropCounter).is_err() {
+                    while p.try_push(DropCounter).is_err() {
                         DROPS.fetch_sub(1, Ordering::SeqCst);
                     }
                 }
@@ -105,7 +105,7 @@ fn drops() {
         .unwrap();
 
         for _ in 0..additional {
-            p.push(DropCounter).unwrap();
+            p.try_push(DropCounter).unwrap();
         }
 
         assert_eq!(DROPS.load(Ordering::SeqCst), steps);
