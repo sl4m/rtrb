@@ -255,7 +255,7 @@ impl<T> Producer<T> {
     /// assert_eq!(p.try_push(20), Err(PushError::Full(20)));
     /// ```
     pub fn try_push(&mut self, value: T) -> Result<(), PushError<T>> {
-        if let Some(tail) = self.get_tail(1) {
+        if let Ok(tail) = self.get_tail(1) {
             unsafe {
                 self.rb.slot(tail).write(value);
             }
@@ -264,31 +264,6 @@ impl<T> Producer<T> {
         } else {
             Err(PushError::Full(value))
         }
-    }
-
-<<<<<<< HEAD
-    fn get_tail(&mut self, n: usize) -> Option<usize> {
-        let head = self.head.get();
-        let tail = self.tail.get();
-
-        // Check if the queue has *possibly* not enough slots.
-        if self.rb.distance(head, tail) + n > self.rb.capacity {
-            // Refresh the head ...
-            let head = self.rb.head.load(Ordering::Acquire);
-            self.head.set(head);
-
-            // ... and check if there *really* are not enough slots.
-            if self.rb.distance(head, tail) + n > self.rb.capacity {
-                return None;
-            }
-        }
-        Some(tail)
-    }
-
-    fn advance_tail(&mut self, tail: usize, n: usize) {
-        let tail = self.rb.increment(tail, n);
-        self.rb.tail.store(tail, Ordering::Release);
-        self.tail.set(tail);
     }
 
     /// Returns the number of slots available for writing.
@@ -320,23 +295,30 @@ impl<T> Producer<T> {
         self.rb.capacity
     }
 
-    fn get_tail(&mut self, n: usize) -> Option<usize> {
+    /// Returns tail position on success, available slots on error.
+    fn get_tail(&self, n: usize) -> Result<usize, usize> {
+        let head = self.head.get();
+        let tail = self.tail.get();
+
         // Check if the queue has *possibly* not enough slots.
-        if self.rb.distance(self.head, self.tail) + n > self.rb.capacity {
+        if self.rb.capacity - self.rb.distance(head, tail) < n {
             // Refresh the head ...
-            self.head = self.rb.head.load(Ordering::Acquire);
+            let head = self.rb.head.load(Ordering::Acquire);
+            self.head.set(head);
+
             // ... and check if there *really* are not enough slots.
-            if self.rb.distance(self.head, self.tail) + n > self.rb.capacity {
-                return None;
+            let slots = self.rb.capacity - self.rb.distance(head, tail);
+            if slots < n {
+                return Err(slots);
             }
         }
-        Some(self.tail)
+        Ok(tail)
     }
 
     fn advance_tail(&mut self, tail: usize, n: usize) {
         let tail = self.rb.increment(tail, n);
         self.rb.tail.store(tail, Ordering::Release);
-        self.tail = tail;
+        self.tail.set(tail);
     }
 }
 
@@ -419,7 +401,7 @@ impl<T> Consumer<T> {
     /// assert_eq!(c.try_pop().ok(), Some(20));
     /// ```
     pub fn try_pop(&mut self) -> Result<T, PopError> {
-        if let Some(head) = self.get_head(1) {
+        if let Ok(head) = self.get_head(1) {
             let value = unsafe { self.rb.slot(head).read() };
             self.advance_head(head, 1);
             Ok(value)
@@ -448,7 +430,7 @@ impl<T> Consumer<T> {
     /// `c.as_slices(c.slots())` never fails.
     /// `c.as_slices(0)` never fails (but is quite useless).
     pub fn as_slices(&self, n: usize) -> Result<(&[T], &[T]), SlicesError> {
-        let head = match self.get_head(n) {
+        let _head = match self.get_head(n) {
             Ok(head) => head,
             Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
         };
@@ -472,7 +454,8 @@ impl<T> Consumer<T> {
         self.rb.capacity
     }
 
-    fn get_head(&mut self, n: usize) -> Option<usize> {
+    /// Returns head position on success, available slots on error.
+    fn get_head(&self, n: usize) -> Result<usize, usize> {
         let head = self.head.get();
         let tail = self.tail.get();
 
@@ -483,11 +466,12 @@ impl<T> Consumer<T> {
             self.tail.set(tail);
 
             // ... and check if there *really* are not enough slots.
-            if self.rb.distance(head, tail) < n {
-                return None;
+            let slots = self.rb.distance(head, tail);
+            if slots < n {
+                return Err(slots);
             }
         }
-        Some(head)
+        Ok(head)
     }
 
     fn advance_head(&mut self, head: usize, n: usize) {
