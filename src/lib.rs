@@ -416,8 +416,8 @@ impl<T> Consumer<T> {
     }
 
     /// Returns `true` if the given number of slots is available for reading.
-    pub fn has_slots(&self, _n: usize) -> bool {
-        unimplemented!();
+    pub fn has_slots(&self, n: usize) -> bool {
+        self.get_head(n).is_ok()
     }
 
     /// Returns `true` if there are no slots available for reading.
@@ -442,8 +442,7 @@ impl<T> Consumer<T> {
     /// assert_eq!(c.as_slices(99), Err(SlicesError::TooFewSlots(1)));
     /// assert_eq!(p.try_push(20), Ok(()));
     /// assert_eq!(c.as_slices(2), Ok(([10, 20].as_ref(), [].as_ref())));
-    /// // TODO: use c.advance(1):
-    /// assert_eq!(c.try_pop(), Ok(10));
+    /// c.advance(1);
     /// assert_eq!(p.try_push(30), Ok(()));
     /// assert_eq!(c.as_slices(2), Ok(([20].as_ref(), [30].as_ref())));
     /// assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
@@ -510,8 +509,14 @@ where
     T: Copy,
 {
     /// Panics if `n` is larger than the number of available slots.
-    pub fn advance(&mut self, _n: usize) {
-        unimplemented!();
+    pub fn advance(&mut self, n: usize) {
+        if let Ok(head) = self.get_head(n) {
+            self.advance_head(head, n);
+        } else {
+            // TODO: better message
+            // TODO: use match to get available slots from Err()?
+            panic!("n is out of range");
+        }
     }
 }
 
