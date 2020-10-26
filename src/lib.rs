@@ -18,7 +18,7 @@
 //! ```
 //! use rtrb::RingBuffer;
 //!
-//! let (p, c) = RingBuffer::new(2).split();
+//! let (mut p, mut c) = RingBuffer::new(2).split();
 //!
 //! assert!(p.try_push(1).is_ok());
 //! assert!(p.try_push(2).is_ok());
@@ -43,7 +43,7 @@ use cache_padded::CachePadded;
 
 mod error;
 
-pub use error::{PopError, PushError};
+pub use error::{PopError, PushError, SlicesError};
 
 /// A bounded single-producer single-consumer queue.
 pub struct RingBuffer<T> {
@@ -89,7 +89,7 @@ impl<T> RingBuffer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (p, c) = RingBuffer::new(100).split();
+    /// let (mut p, mut c) = RingBuffer::new(100).split();
     /// assert!(p.try_push(0.0f32).is_ok());
     /// ```
     pub fn new(capacity: usize) -> RingBuffer<T> {
@@ -118,7 +118,7 @@ impl<T> RingBuffer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (p, c) = RingBuffer::<f32>::new(100).split();
+    /// let (mut p, mut c) = RingBuffer::<f32>::new(100).split();
     /// ```
     pub fn split(self) -> (Producer<T>, Consumer<T>) {
         let rb = Arc::new(self);
@@ -161,15 +161,16 @@ impl<T> RingBuffer<T> {
         }
     }
 
-    /// Increments a position by going one slot forward.
+    /// Increments a position by going `n` slots forward.
     ///
     /// The position must be in range `0 .. 2 * capacity`.
     #[inline]
-    fn increment(&self, pos: usize) -> usize {
-        if pos < 2 * self.capacity - 1 {
-            pos + 1
+    fn increment(&self, pos: usize, n: usize) -> usize {
+        let threshold = 2 * self.capacity - n;
+        if pos < threshold {
+            pos + n
         } else {
-            0
+            pos - threshold
         }
     }
 
@@ -196,7 +197,7 @@ impl<T> Drop for RingBuffer<T> {
             unsafe {
                 self.slot(head).drop_in_place();
             }
-            head = self.increment(head);
+            head = self.increment(head, 1);
         }
 
         // Finally, deallocate the buffer, but don't run any destructors.
@@ -219,7 +220,7 @@ impl<T> Drop for RingBuffer<T> {
 /// ```
 /// use rtrb::RingBuffer;
 ///
-/// let (producer, consumer) = RingBuffer::<f32>::new(1000).split();
+/// let (mut producer, mut consumer) = RingBuffer::<f32>::new(1000).split();
 /// ```
 pub struct Producer<T> {
     /// The inner representation of the queue.
@@ -248,38 +249,60 @@ impl<T> Producer<T> {
     /// ```
     /// use rtrb::{RingBuffer, PushError};
     ///
-    /// let (p, c) = RingBuffer::new(1).split();
+    /// let (mut p, mut c) = RingBuffer::new(1).split();
     ///
     /// assert_eq!(p.try_push(10), Ok(()));
     /// assert_eq!(p.try_push(20), Err(PushError::Full(20)));
     /// ```
-    pub fn try_push(&self, value: T) -> Result<(), PushError<T>> {
-        let mut head = self.head.get();
-        let mut tail = self.tail.get();
-
-        // Check if the queue is *possibly* full.
-        if self.rb.distance(head, tail) == self.rb.capacity {
-            // We need to refresh the head and check again if the queue is *really* full.
-            head = self.rb.head.load(Ordering::Acquire);
-            self.head.set(head);
-
-            // Is the queue *really* full?
-            if self.rb.distance(head, tail) == self.rb.capacity {
-                return Err(PushError::Full(value));
-            }
-        }
-
-        // Write the value into the tail slot.
+    pub fn try_push(&mut self, value: T) -> Result<(), PushError<T>> {
+        if let Some(tail) = self.get_tail(1) {
         unsafe {
             self.rb.slot(tail).write(value);
         }
+            self.advance_tail(tail, 1);
+            Ok(())
+        } else {
+            Err(PushError::Full(value))
+        }
+    }
 
-        // Move the tail one slot forward.
-        tail = self.rb.increment(tail);
+    fn get_tail(&mut self, n: usize) -> Option<usize> {
+        let head = self.head.get();
+        let tail = self.tail.get();
+
+        // Check if the queue has *possibly* not enough slots.
+        if self.rb.distance(head, tail) + n > self.rb.capacity {
+            // Refresh the head ...
+            let head = self.rb.head.load(Ordering::Acquire);
+            self.head.set(head);
+
+            // ... and check if there *really* are not enough slots.
+            if self.rb.distance(head, tail) + n > self.rb.capacity {
+                return None;
+            }
+        }
+        Some(tail)
+    }
+
+    fn advance_tail(&mut self, tail: usize, n:usize) {
+        let tail = self.rb.increment(tail, n);
         self.rb.tail.store(tail, Ordering::Release);
         self.tail.set(tail);
+    }
 
-        Ok(())
+    /// Returns the number of slots available for writing.
+    pub fn slots(&self) -> usize {
+        unimplemented!();
+    }
+
+    /// Returns `true` if the given number of slots is available for writing.
+    pub fn has_slots(&self, _n: usize) -> bool {
+        unimplemented!();
+    }
+
+    /// Returns `true` if there are no slots available for writing.
+    pub fn is_full(&self) -> bool {
+        !self.has_slots(1)
     }
 
     /// Returns the capacity of the queue.
@@ -289,11 +312,29 @@ impl<T> Producer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (p, c) = RingBuffer::<f32>::new(100).split();
+    /// let (mut p, mut c) = RingBuffer::<f32>::new(100).split();
     /// assert_eq!(p.capacity(), 100);
     /// ```
     pub fn capacity(&self) -> usize {
         self.rb.capacity
+    }
+}
+
+impl<T> Producer<T>
+where
+    T: Copy + Default,
+{
+    /// Returns mutable slices to the underlying buffer.
+    ///
+    /// `c.as_slices(c.slots())` never fails.
+    /// `c.as_slices(0)` never fails (but is quite useless).
+    pub fn as_mut_slices(&mut self, _n: usize) -> Result<(&mut [T], &mut [T]), SlicesError> {
+        unimplemented!();
+    }
+
+    /// Panics if `n` is larger than the number of available slots.
+    pub fn advance(&mut self, _n: usize) {
+        unimplemented!();
     }
 }
 
@@ -316,7 +357,7 @@ impl<T> fmt::Debug for Producer<T> {
 /// ```
 /// use rtrb::RingBuffer;
 ///
-/// let (producer, consumer) = RingBuffer::<f32>::new(1000).split();
+/// let (mut producer, mut consumer) = RingBuffer::<f32>::new(1000).split();
 /// ```
 pub struct Consumer<T> {
     /// The inner representation of the queue.
@@ -348,7 +389,7 @@ impl<T> Consumer<T> {
     /// ```
     /// use rtrb::{PopError, RingBuffer};
     ///
-    /// let (p, c) = RingBuffer::new(1).split();
+    /// let (mut p, mut c) = RingBuffer::new(1).split();
     ///
     /// assert_eq!(p.try_push(10), Ok(()));
     /// assert_eq!(c.try_pop(), Ok(10));
@@ -357,31 +398,37 @@ impl<T> Consumer<T> {
     /// assert_eq!(p.try_push(20), Ok(()));
     /// assert_eq!(c.try_pop().ok(), Some(20));
     /// ```
-    pub fn try_pop(&self) -> Result<T, PopError> {
-        let mut head = self.head.get();
-        let mut tail = self.tail.get();
-
-        // Check if the queue is *possibly* empty.
-        if head == tail {
-            // We need to refresh the tail and check again if the queue is *really* empty.
-            tail = self.rb.tail.load(Ordering::Acquire);
-            self.tail.set(tail);
-
-            // Is the queue *really* empty?
-            if head == tail {
-                return Err(PopError::Empty);
-            }
+    pub fn try_pop(&mut self) -> Result<T, PopError> {
+        if let Some(head) = self.get_head(1) {
+            let value = unsafe { self.rb.slot(head).read() };
+            self.advance_head(head, 1);
+            Ok(value)
+        } else {
+            Err(PopError::Empty)
         }
+    }
 
-        // Read the value from the head slot.
-        let value = unsafe { self.rb.slot(head).read() };
+    /// Returns the number of slots available for reading.
+    pub fn slots(&self) -> usize {
+        unimplemented!();
+    }
 
-        // Move the head one slot forward.
-        head = self.rb.increment(head);
-        self.rb.head.store(head, Ordering::Release);
-        self.head.set(head);
+    /// Returns `true` if the given number of slots is available for reading.
+    pub fn has_slots(&self, _n: usize) -> bool {
+        unimplemented!();
+    }
 
-        Ok(value)
+    /// Returns `true` if there are no slots available for reading.
+    pub fn is_empty(&self) -> bool {
+        !self.has_slots(1)
+    }
+
+    /// Returns slices to the underlying buffer.
+    ///
+    /// `c.as_slices(c.slots())` never fails.
+    /// `c.as_slices(0)` never fails (but is quite useless).
+    pub fn as_slices(&self, _n: usize) -> Result<(&[T], &[T]), SlicesError> {
+        unimplemented!();
     }
 
     /// Returns the capacity of the queue.
@@ -391,11 +438,45 @@ impl<T> Consumer<T> {
     /// ```
     /// use rtrb::RingBuffer;
     ///
-    /// let (p, c) = RingBuffer::<f32>::new(100).split();
+    /// let (mut p, mut c) = RingBuffer::<f32>::new(100).split();
     /// assert_eq!(c.capacity(), 100);
     /// ```
     pub fn capacity(&self) -> usize {
         self.rb.capacity
+    }
+
+    fn get_head(&mut self, n: usize) -> Option<usize> {
+        let head = self.head.get();
+        let tail = self.tail.get();
+
+        // Check if the queue has *possibly* not enough slots.
+        if self.rb.distance(head, tail) < n {
+            // Refresh the tail ...
+            let tail = self.rb.tail.load(Ordering::Acquire);
+            self.tail.set(tail);
+
+            // ... and check if there *really* are not enough slots.
+            if self.rb.distance(head, tail) < n {
+                return None;
+            }
+        }
+        Some(head)
+    }
+
+    fn advance_head(&mut self, head: usize, n: usize) {
+        let head = self.rb.increment(head, n);
+        self.rb.head.store(head, Ordering::Release);
+        self.head.set(head);
+    }
+}
+
+impl<T> Consumer<T>
+where
+    T: Copy,
+{
+    /// Panics if `n` is larger than the number of available slots.
+    pub fn advance(&mut self, _n: usize) {
+        unimplemented!();
     }
 }
 
