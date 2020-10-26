@@ -447,7 +447,14 @@ impl<T> Consumer<T> {
     ///
     /// `c.as_slices(c.slots())` never fails.
     /// `c.as_slices(0)` never fails (but is quite useless).
-    pub fn as_slices(&self, _n: usize) -> Result<(&[T], &[T]), SlicesError> {
+    pub fn as_slices(&self, n: usize) -> Result<(&[T], &[T]), SlicesError> {
+        let head = match self.get_head(n) {
+            Ok(head) => head,
+            Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
+        };
+
+        // TODO: create slices
+
         unimplemented!();
     }
 
