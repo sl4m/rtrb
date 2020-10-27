@@ -507,7 +507,7 @@ impl<T> Consumer<T> {
     /// let (mut p, c) = RingBuffer::new(2).split();
     ///
     /// assert_eq!(p.push(10), Ok(()));
-    /// assert_eq!(c.peek_slices(2), Err(SlicesError::TooFewSlots(1)));
+    /// assert_eq!(c.peek_slices(2).unwrap_err(), SlicesError::TooFewSlots(1));
     /// assert_eq!(p.push(20), Ok(()));
     ///
     /// if let Ok(slices) = c.peek_slices(2) {
@@ -527,23 +527,8 @@ impl<T> Consumer<T> {
     /// //assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
     /// ```
     pub fn peek_slices(&self, n: usize) -> Result<PeekSlices<'_, T>, SlicesError> {
-        let head = match self.get_head(n) {
-            Ok(head) => head,
-            Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
-        };
-
-        // TODO: helper function collapse_position()?
-
-        let buffer_remainder = if head < self.rb.capacity {
-            self.rb.capacity - head
-        } else {
-            2 * self.rb.capacity - head
-        };
-        let first_len = n.min(buffer_remainder);
-        Ok(PeekSlices {
-            first: unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) },
-            second: unsafe { std::slice::from_raw_parts(self.rb.slot(0), n - first_len) },
-        })
+        let (first, second) = self.slices(n)?;
+        Ok(PeekSlices { first, second })
     }
 
     /// Returns slices for `n` slots, drops their contents when done and advances read position.
@@ -589,10 +574,25 @@ impl<T> Consumer<T> {
         Ok(head)
     }
 
-    fn advance_head(&mut self, head: usize, n: usize) {
+    fn advance_head(&self, head: usize, n: usize) {
         let head = self.rb.increment(head, n);
         self.rb.head.store(head, Ordering::Release);
         self.head.set(head);
+    }
+
+    fn slices(&self, n: usize) -> Result<(&[T], &[T]), SlicesError> {
+        let head = self.get_head(n).map_err(SlicesError::TooFewSlots)?;
+        let head_to_end = if head < self.rb.capacity {
+            self.rb.capacity - head
+        } else {
+            2 * self.rb.capacity - head
+        };
+        let first_len = head_to_end.min(n);
+        Ok((
+            // Safety: get_head() guarantees valid head position
+            unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) },
+            unsafe { std::slice::from_raw_parts(self.rb.buffer, n - first_len) },
+        ))
     }
 }
 
@@ -604,9 +604,47 @@ where
     ///
     /// If not enough slots are available for reading, an error is returned.
     ///
+    /// To make sure that no [`Drop`] implementations are inadvertently called,
+    /// this requires `T` to implement `Copy`.
     /// If `T` doesn't implement `Copy`, [`Consumer::drop_slices()`] can be used instead.
-    pub fn pop_slices(&mut self, _n: usize) -> Result<PopSlices, SlicesError> {
-        unimplemented!();
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtrb::{RingBuffer, SlicesError};
+    ///
+    /// let (mut p, mut c) = RingBuffer::new(3).split();
+    ///
+    /// assert_eq!(p.push(10), Ok(()));
+    /// assert_eq!(c.pop_slices(2).unwrap_err(), SlicesError::TooFewSlots(1));
+    /// assert_eq!(p.push(20), Ok(()));
+    ///
+    /// if let Ok(slices) = c.pop_slices(2) {
+    ///     assert_eq!(slices.first, [10, 20].as_ref());
+    ///     assert_eq!(slices.second, [].as_ref());
+    ///     //assert_eq!(slices.into_iter().collect::<Vec<_>>, [10, 20]);
+    /// } else {
+    ///     unreachable!();
+    /// }
+    ///
+    /// assert_eq!(c.pop_slices(2).unwrap_err(), SlicesError::TooFewSlots(0));
+    /// assert_eq!(p.push(30), Ok(()));
+    /// assert_eq!(p.push(40), Ok(()));
+    ///
+    /// if let Ok(slices) = c.pop_slices(2) {
+    ///     assert_eq!(slices.first, [30].as_ref());
+    ///     assert_eq!(slices.second, [40].as_ref());
+    /// } else {
+    ///     unreachable!();
+    /// };
+    /// ```
+    pub fn pop_slices(&mut self, n: usize) -> Result<PopSlices<'_, T>, SlicesError> {
+        let (first, second) = self.slices(n)?;
+        Ok(PopSlices {
+            first,
+            second,
+            consumer: self,
+        })
     }
 }
 
@@ -616,7 +654,7 @@ where
 ///
 /// It implements [`IntoIterator`] by chaining the two slices together,
 /// and it can therefore, for example, be iterated with a `for` loop.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct PeekSlices<'a, T> {
     /// First part of the requested slots.
     ///
@@ -634,7 +672,29 @@ pub struct DropSlices {}
 
 /// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
 /// the read position will be advanced.
-pub struct PopSlices {}
+///
+/// This is returned from [`Consumer::pop_slices()`].
+#[derive(Debug)]
+pub struct PopSlices<'a, T> {
+    /// First part of the requested slots.
+    ///
+    /// Can only be empty if `0` slots have been requested.
+    pub first: &'a [T],
+    /// Second part of the requested slots.
+    ///
+    /// If `first` contains all requested slots, this is empty.
+    pub second: &'a [T],
+    consumer: &'a Consumer<T>,
+}
+
+impl<'a, T> Drop for PopSlices<'a, T> {
+    fn drop(&mut self) {
+        self.consumer.advance_head(
+            self.consumer.head.get(),
+            self.first.len() + self.second.len(),
+        );
+    }
+}
 
 impl<'a, T> IntoIterator for PeekSlices<'a, T> {
     type Item = &'a T;
