@@ -20,13 +20,13 @@
 //!
 //! let (mut p, mut c) = RingBuffer::new(2).split();
 //!
-//! assert!(p.try_push(1).is_ok());
-//! assert!(p.try_push(2).is_ok());
-//! assert!(p.try_push(3).is_err());
+//! assert!(p.push(1).is_ok());
+//! assert!(p.push(2).is_ok());
+//! assert!(p.push(3).is_err());
 //!
-//! assert_eq!(c.try_pop(), Ok(1));
-//! assert_eq!(c.try_pop(), Ok(2));
-//! assert!(c.try_pop().is_err());
+//! assert_eq!(c.pop(), Ok(1));
+//! assert_eq!(c.pop(), Ok(2));
+//! assert!(c.pop().is_err());
 //! ```
 
 #![warn(rust_2018_idioms)]
@@ -43,7 +43,7 @@ use cache_padded::CachePadded;
 
 mod error;
 
-pub use error::{PopError, PushError, SlicesError};
+pub use error::{PeekError, PopError, PushError, SlicesError};
 
 /// A bounded single-producer single-consumer queue.
 pub struct RingBuffer<T> {
@@ -90,7 +90,7 @@ impl<T> RingBuffer<T> {
     /// use rtrb::RingBuffer;
     ///
     /// let (mut p, c) = RingBuffer::new(100).split();
-    /// assert!(p.try_push(0.0f32).is_ok());
+    /// assert!(p.push(0.0f32).is_ok());
     /// ```
     pub fn new(capacity: usize) -> RingBuffer<T> {
         assert!(capacity > 0, "capacity must be non-zero");
@@ -251,10 +251,10 @@ impl<T> Producer<T> {
     ///
     /// let (mut p, c) = RingBuffer::new(1).split();
     ///
-    /// assert_eq!(p.try_push(10), Ok(()));
-    /// assert_eq!(p.try_push(20), Err(PushError::Full(20)));
+    /// assert_eq!(p.push(10), Ok(()));
+    /// assert_eq!(p.push(20), Err(PushError::Full(20)));
     /// ```
-    pub fn try_push(&mut self, value: T) -> Result<(), PushError<T>> {
+    pub fn push(&mut self, value: T) -> Result<(), PushError<T>> {
         if let Ok(tail) = self.get_tail(1) {
             unsafe {
                 self.rb.slot(tail).write(value);
@@ -272,13 +272,13 @@ impl<T> Producer<T> {
     }
 
     /// Returns `true` if the given number of slots is available for writing.
-    pub fn has_slots(&self, _n: usize) -> bool {
+    fn _has_slots(&self, _n: usize) -> bool {
         unimplemented!();
     }
 
     /// Returns `true` if there are no slots available for writing.
     pub fn is_full(&self) -> bool {
-        !self.has_slots(1)
+        !self._has_slots(1)
     }
 
     /// Returns the capacity of the queue.
@@ -326,6 +326,7 @@ impl<T> Producer<T>
 where
     T: Copy + Default,
 {
+    /*
     /// Returns mutable slices to the underlying buffer.
     ///
     /// `c.as_slices(c.slots())` never fails.
@@ -333,11 +334,14 @@ where
     pub fn as_mut_slices(&mut self, _n: usize) -> Result<(&mut [T], &mut [T]), SlicesError> {
         unimplemented!();
     }
+    */
 
+    /*
     /// Panics if `n` is larger than the number of available slots.
     pub fn advance(&mut self, _n: usize) {
         unimplemented!();
     }
+    */
 }
 
 impl<T> fmt::Debug for Producer<T> {
@@ -393,14 +397,14 @@ impl<T> Consumer<T> {
     ///
     /// let (mut p, mut c) = RingBuffer::new(1).split();
     ///
-    /// assert_eq!(p.try_push(10), Ok(()));
-    /// assert_eq!(c.try_pop(), Ok(10));
-    /// assert_eq!(c.try_pop(), Err(PopError::Empty));
+    /// assert_eq!(p.push(10), Ok(()));
+    /// assert_eq!(c.pop(), Ok(10));
+    /// assert_eq!(c.pop(), Err(PopError::Empty));
     ///
-    /// assert_eq!(p.try_push(20), Ok(()));
-    /// assert_eq!(c.try_pop().ok(), Some(20));
+    /// assert_eq!(p.push(20), Ok(()));
+    /// assert_eq!(c.pop().ok(), Some(20));
     /// ```
-    pub fn try_pop(&mut self) -> Result<T, PopError> {
+    pub fn pop(&mut self) -> Result<T, PopError> {
         if let Ok(head) = self.get_head(1) {
             let value = unsafe { self.rb.slot(head).read() };
             self.advance_head(head, 1);
@@ -410,21 +414,46 @@ impl<T> Consumer<T> {
         }
     }
 
+    /// Attempts to read an element from the queue without removing it.
+    ///
+    /// If the queue is empty, an error is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtrb::{PeekError, RingBuffer};
+    ///
+    /// let (mut p, c) = RingBuffer::new(1).split();
+    ///
+    /// assert_eq!(c.peek(), Err(PeekError::Empty));
+    /// assert_eq!(p.push(10), Ok(()));
+    /// assert_eq!(c.peek(), Ok(&10));
+    /// assert_eq!(c.peek(), Ok(&10));
+    /// ```
+    pub fn peek(&self) -> Result<&T, PeekError> {
+        if let Ok(head) = self.get_head(1) {
+            Ok(unsafe { &*self.rb.slot(head) })
+        } else {
+            Err(PeekError::Empty)
+        }
+    }
+
     /// Returns the number of slots available for reading.
     pub fn slots(&self) -> usize {
         unimplemented!();
     }
 
     /// Returns `true` if the given number of slots is available for reading.
-    pub fn has_slots(&self, n: usize) -> bool {
+    fn _has_slots(&self, n: usize) -> bool {
         self.get_head(n).is_ok()
     }
 
     /// Returns `true` if there are no slots available for reading.
     pub fn is_empty(&self) -> bool {
-        !self.has_slots(1)
+        !self._has_slots(1)
     }
 
+    /*
     /// Returns slices to the underlying buffer.
     ///
     /// `c.as_slices(c.slots())` never fails.
@@ -438,12 +467,12 @@ impl<T> Consumer<T> {
     /// let (mut p, mut c) = RingBuffer::new(2).split();
     ///
     /// assert_eq!(c.as_slices(1), Err(SlicesError::TooFewSlots(0)));
-    /// assert_eq!(p.try_push(10), Ok(()));
+    /// assert_eq!(p.push(10), Ok(()));
     /// assert_eq!(c.as_slices(99), Err(SlicesError::TooFewSlots(1)));
-    /// assert_eq!(p.try_push(20), Ok(()));
+    /// assert_eq!(p.push(20), Ok(()));
     /// assert_eq!(c.as_slices(2), Ok(([10, 20].as_ref(), [].as_ref())));
     /// c.advance(1);
-    /// assert_eq!(p.try_push(30), Ok(()));
+    /// assert_eq!(p.push(30), Ok(()));
     /// assert_eq!(c.as_slices(2), Ok(([20].as_ref(), [30].as_ref())));
     /// assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
     /// ```
@@ -461,6 +490,25 @@ impl<T> Consumer<T> {
         let first_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) };
         let second_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(0), n - first_len) };
         Ok((first_slice, second_slice))
+    }
+    */
+
+    /// Returns slices for `n` slots.
+    ///
+    /// This does *not* advance the read position.
+    ///
+    /// If not enough slots are available for reading, an error is returned.
+    pub fn peek_slices(&self, _n: usize) -> Result<PeekSlices, SlicesError> {
+        unimplemented!();
+    }
+
+    /// Returns slices for `n` slots, drops their contents when done and advances read position.
+    ///
+    /// If not enough slots are available for reading, an error is returned.
+    ///
+    /// If `T` implements `Copy`, [`Consumer::pop_slices()`] should be used instead.
+    pub fn drop_slices(&mut self, _n: usize) -> Result<DropSlices, SlicesError> {
+        unimplemented!();
     }
 
     /// Returns the capacity of the queue.
@@ -508,6 +556,32 @@ impl<T> Consumer<T>
 where
     T: Copy,
 {
+    /// Returns slices for `n` slots and advances read position when done.
+    ///
+    /// If not enough slots are available for reading, an error is returned.
+    ///
+    /// If `T` doesn't implement `Copy`, [`Consumer::drop_slices()`] can be used instead.
+    pub fn pop_slices(&mut self, _n: usize) -> Result<PopSlices, SlicesError> {
+        unimplemented!();
+    }
+}
+
+/// Contains two slices from the ring buffer.
+pub struct PeekSlices {}
+
+/// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
+/// the contents of the slices will be dropped and the read position will be advanced.
+pub struct DropSlices {}
+
+/// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
+/// the read position will be advanced.
+pub struct PopSlices {}
+
+/*
+impl<T> Consumer<T>
+where
+    T: Copy,
+{
     /// Panics if `n` is larger than the number of available slots.
     pub fn advance(&mut self, n: usize) {
         if let Ok(head) = self.get_head(n) {
@@ -519,6 +593,7 @@ where
         }
     }
 }
+*/
 
 impl<T> fmt::Debug for Consumer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
