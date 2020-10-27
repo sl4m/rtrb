@@ -326,22 +326,12 @@ impl<T> Producer<T>
 where
     T: Copy + Default,
 {
-    /*
-    /// Returns mutable slices to the underlying buffer.
+    /// Returns mutable slices for `n` slots and advances write position when done.
     ///
-    /// `c.as_slices(c.slots())` never fails.
-    /// `c.as_slices(0)` never fails (but is quite useless).
-    pub fn as_mut_slices(&mut self, _n: usize) -> Result<(&mut [T], &mut [T]), SlicesError> {
+    /// If not enough slots are available for writing, an error is returned.
+    pub fn push_slices(&mut self, _n: usize) -> Result<PushSlices<'_, T>, SlicesError> {
         unimplemented!();
     }
-    */
-
-    /*
-    /// Panics if `n` is larger than the number of available slots.
-    pub fn advance(&mut self, _n: usize) {
-        unimplemented!();
-    }
-    */
 }
 
 impl<T> fmt::Debug for Producer<T> {
@@ -604,6 +594,23 @@ where
     }
 }
 
+/// Contains two mutable slices from the ring buffer.
+/// When this structure is dropped (falls out of scope), the slots are made available for reading.
+///
+/// This is returned from [`Producer::push_slices()`].
+#[derive(Debug)]
+pub struct PushSlices<'a, T> {
+    /// First part of the requested slots.
+    ///
+    /// Can only be empty if `0` slots have been requested.
+    pub first: &'a mut [T],
+    /// Second part of the requested slots.
+    ///
+    /// If `first` contains all requested slots, this is empty.
+    pub second: &'a mut [T],
+    producer: &'a Producer<T>,
+}
+
 /// Contains two slices from the ring buffer.
 ///
 /// This is returned from [`Consumer::peek_slices()`].
@@ -641,6 +648,12 @@ pub struct PopSlices<'a, T> {
     /// If `first` contains all requested slots, this is empty.
     pub second: &'a [T],
     consumer: &'a Consumer<T>,
+}
+
+impl<'a, T> Drop for PushSlices<'a, T> {
+    fn drop(&mut self) {
+        todo!()
+    }
 }
 
 impl<'a, T> Drop for PopSlices<'a, T> {
