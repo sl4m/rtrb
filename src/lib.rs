@@ -481,8 +481,47 @@ impl<T> Consumer<T> {
     /// If not enough slots are available for reading, an error is returned.
     ///
     /// If `T` implements `Copy`, [`Consumer::pop_slices()`] should be used instead.
-    pub fn drop_slices(&mut self, _n: usize) -> Result<DropSlices, SlicesError> {
-        unimplemented!();
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtrb::{RingBuffer, SlicesError};
+    ///
+    /// static mut DROPS: i32 = 0;
+    ///
+    /// #[derive(Debug)]
+    /// struct Thing;
+    /// impl Drop for Thing {
+    ///     fn drop(&mut self) { unsafe { DROPS += 1; } }
+    /// }
+    ///
+    /// {
+    ///     let (mut p, mut c) = RingBuffer::new(2).split();
+    ///
+    ///     assert!(p.push(Thing).is_ok());
+    ///     assert_eq!(c.drop_slices(2).unwrap_err(), SlicesError::TooFewSlots(1));
+    ///     assert!(p.push(Thing).is_ok());
+    ///
+    ///     if let Ok(slices) = c.drop_slices(2) {
+    ///         assert_eq!(slices.first.len(), 2);
+    ///         assert_eq!(slices.second.len(), 0);
+    ///     } else {
+    ///         unreachable!();
+    ///     }
+    ///     // Two Things have been dropped when "slices" went out of scope:
+    ///     assert_eq!(unsafe { DROPS }, 2);
+    ///     assert!(p.push(Thing).is_ok());
+    /// }
+    /// // Last Thing has been dropped when ring buffer went out of scope:
+    /// assert_eq!(unsafe { DROPS }, 3);
+    /// ```
+    pub fn drop_slices(&mut self, n: usize) -> Result<DropSlices<'_, T>, SlicesError> {
+        let (first, second) = self.slices(n)?;
+        Ok(DropSlices {
+            first,
+            second,
+            consumer: self,
+        })
     }
 
     /// Returns the capacity of the queue.
@@ -631,7 +670,23 @@ pub struct PeekSlices<'a, T> {
 
 /// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
 /// the contents of the slices will be dropped and the read position will be advanced.
-pub struct DropSlices {}
+///
+/// This is returned from [`Consumer::drop_slices()`].
+///
+/// It implements [`IntoIterator`] by chaining the two slices together,
+/// and it can therefore, for example, be iterated with a `for` loop.
+#[derive(Debug)]
+pub struct DropSlices<'a, T> {
+    /// First part of the requested slots.
+    ///
+    /// Can only be empty if `0` slots have been requested.
+    pub first: &'a [T],
+    /// Second part of the requested slots.
+    ///
+    /// If `first` contains all requested slots, this is empty.
+    pub second: &'a [T],
+    consumer: &'a Consumer<T>,
+}
 
 /// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
 /// the read position will be advanced.
@@ -662,6 +717,29 @@ impl<'a, T> Drop for PopSlices<'a, T> {
             self.consumer.head.get(),
             self.first.len() + self.second.len(),
         );
+    }
+}
+
+impl<'a, T> Drop for DropSlices<'a, T> {
+    fn drop(&mut self) {
+        // Safety: the exclusive reference taken by drop_slices()
+        //         makes sure nobody else has access to the buffer.
+        let head = self.consumer.head.get();
+        // Safety: head has not yet been incremented
+        let ptr = unsafe { self.consumer.rb.slot(head) };
+        for i in 0..self.first.len() {
+            unsafe {
+                ptr.add(i).drop_in_place();
+            }
+        }
+        let ptr = self.consumer.rb.buffer;
+        for i in 0..self.second.len() {
+            unsafe {
+                ptr.add(i).drop_in_place();
+            }
+        }
+        self.consumer
+            .advance_head(head, self.first.len() + self.second.len());
     }
 }
 
