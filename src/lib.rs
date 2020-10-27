@@ -453,46 +453,6 @@ impl<T> Consumer<T> {
         !self._has_slots(1)
     }
 
-    /*
-    /// Returns slices to the underlying buffer.
-    ///
-    /// `c.as_slices(c.slots())` never fails.
-    /// `c.as_slices(0)` never fails (but is quite useless).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rtrb::{RingBuffer, SlicesError};
-    ///
-    /// let (mut p, mut c) = RingBuffer::new(2).split();
-    ///
-    /// assert_eq!(c.as_slices(1), Err(SlicesError::TooFewSlots(0)));
-    /// assert_eq!(p.push(10), Ok(()));
-    /// assert_eq!(c.as_slices(99), Err(SlicesError::TooFewSlots(1)));
-    /// assert_eq!(p.push(20), Ok(()));
-    /// assert_eq!(c.as_slices(2), Ok(([10, 20].as_ref(), [].as_ref())));
-    /// c.advance(1);
-    /// assert_eq!(p.push(30), Ok(()));
-    /// assert_eq!(c.as_slices(2), Ok(([20].as_ref(), [30].as_ref())));
-    /// assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
-    /// ```
-    pub fn as_slices(&self, n: usize) -> Result<(&[T], &[T]), SlicesError> {
-        let head = match self.get_head(n) {
-            Ok(head) => head,
-            Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
-        };
-        let buffer_remainder = if head < self.rb.capacity {
-            self.rb.capacity - head
-        } else {
-            2 * self.rb.capacity - head
-        };
-        let first_len = n.min(buffer_remainder);
-        let first_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) };
-        let second_slice = unsafe { std::slice::from_raw_parts(self.rb.slot(0), n - first_len) };
-        Ok((first_slice, second_slice))
-    }
-    */
-
     /// Returns slices for `n` slots.
     ///
     /// This does *not* advance the read position.
@@ -511,8 +471,8 @@ impl<T> Consumer<T> {
     /// assert_eq!(p.push(20), Ok(()));
     ///
     /// if let Ok(slices) = c.peek_slices(2) {
-    ///     assert_eq!(slices.first, [10, 20].as_ref());
-    ///     assert_eq!(slices.second, [].as_ref());
+    ///     assert_eq!(slices.first, &[10, 20]);
+    ///     assert_eq!(slices.second, &[]);
     ///
     ///     let mut v = Vec::<i32>::new();
     ///     v.extend(slices); // slices implements IntoIterator!
@@ -520,11 +480,6 @@ impl<T> Consumer<T> {
     /// } else {
     ///     unreachable!();
     /// }
-    ///
-    /// //c.advance(1);
-    /// //assert_eq!(p.push(30), Ok(()));
-    /// //assert_eq!(c.as_slices(2), Ok(([20].as_ref(), [30].as_ref())));
-    /// //assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
     /// ```
     pub fn peek_slices(&self, n: usize) -> Result<PeekSlices<'_, T>, SlicesError> {
         let (first, second) = self.slices(n)?;
@@ -620,9 +575,10 @@ where
     /// assert_eq!(p.push(20), Ok(()));
     ///
     /// if let Ok(slices) = c.pop_slices(2) {
-    ///     assert_eq!(slices.first, [10, 20].as_ref());
-    ///     assert_eq!(slices.second, [].as_ref());
-    ///     //assert_eq!(slices.into_iter().collect::<Vec<_>>, [10, 20]);
+    ///     assert_eq!(slices.first, &[10, 20]);
+    ///     assert_eq!(slices.second, &[]);
+    ///     // slices implements IntoIterator:
+    ///     assert_eq!(slices.into_iter().collect::<Vec<_>>(), [&10, &20]);
     /// } else {
     ///     unreachable!();
     /// }
@@ -632,8 +588,8 @@ where
     /// assert_eq!(p.push(40), Ok(()));
     ///
     /// if let Ok(slices) = c.pop_slices(2) {
-    ///     assert_eq!(slices.first, [30].as_ref());
-    ///     assert_eq!(slices.second, [40].as_ref());
+    ///     assert_eq!(slices.first, &[30]);
+    ///     assert_eq!(slices.second, &[40]);
     /// } else {
     ///     unreachable!();
     /// };
@@ -704,23 +660,13 @@ impl<'a, T> IntoIterator for PeekSlices<'a, T> {
     }
 }
 
-/*
-impl<T> Consumer<T>
-where
-    T: Copy,
-{
-    /// Panics if `n` is larger than the number of available slots.
-    pub fn advance(&mut self, n: usize) {
-        if let Ok(head) = self.get_head(n) {
-            self.advance_head(head, n);
-        } else {
-            // TODO: better message
-            // TODO: use match to get available slots from Err()?
-            panic!("n is out of range");
-        }
+impl<'a, T> IntoIterator for PopSlices<'a, T> {
+    type Item = &'a T;
+    type IntoIter = std::iter::Chain<std::slice::Iter<'a, T>, std::slice::Iter<'a, T>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.first.iter().chain(self.second)
     }
 }
-*/
 
 impl<T> fmt::Debug for Consumer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
