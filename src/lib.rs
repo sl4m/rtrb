@@ -506,14 +506,17 @@ impl<T> Consumer<T> {
     ///
     /// let (mut p, c) = RingBuffer::new(2).split();
     ///
-    /// assert_eq!(c.peek_slices(1), Err(SlicesError::TooFewSlots(0)));
     /// assert_eq!(p.push(10), Ok(()));
-    /// assert_eq!(c.peek_slices(99), Err(SlicesError::TooFewSlots(1)));
+    /// assert_eq!(c.peek_slices(2), Err(SlicesError::TooFewSlots(1)));
     /// assert_eq!(p.push(20), Ok(()));
     ///
     /// if let Ok(slices) = c.peek_slices(2) {
     ///     assert_eq!(slices.first, [10, 20].as_ref());
     ///     assert_eq!(slices.second, [].as_ref());
+    ///
+    ///     let mut v = Vec::<i32>::new();
+    ///     v.extend(slices); // slices implements IntoIterator!
+    ///     assert_eq!(v, [10, 20]);
     /// } else {
     ///     unreachable!();
     /// }
@@ -608,6 +611,11 @@ where
 }
 
 /// Contains two slices from the ring buffer.
+///
+/// This is returned from [`Consumer::peek_slices()`].
+///
+/// It implements [`IntoIterator`] by chaining the two slices together,
+/// and it can therefore, for example, be iterated with a `for` loop.
 #[derive(Debug, PartialEq, Eq)]
 pub struct PeekSlices<'a, T> {
     /// First part of the requested slots.
@@ -627,6 +635,14 @@ pub struct DropSlices {}
 /// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
 /// the read position will be advanced.
 pub struct PopSlices {}
+
+impl<'a, T> IntoIterator for PeekSlices<'a, T> {
+    type Item = &'a T;
+    type IntoIter = std::iter::Chain<std::slice::Iter<'a, T>, std::slice::Iter<'a, T>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.first.iter().chain(self.second)
+    }
+}
 
 /*
 impl<T> Consumer<T>
