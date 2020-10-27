@@ -1,14 +1,14 @@
-extern crate crossbeam;
-
-use crossbeam::queue;
 use std::thread;
+
+use crossbeam_utils::thread::scope;
+use rtrb::RingBuffer;
 
 mod message;
 
 const MESSAGES: usize = 5_000_000;
 
 fn seq() {
-    let (p, c) = queue::spsc::new(MESSAGES);
+    let (p, c) = RingBuffer::new(MESSAGES).split();
 
     for i in 0..MESSAGES {
         p.push(message::new(i)).unwrap();
@@ -20,9 +20,9 @@ fn seq() {
 }
 
 fn spsc() {
-    let (p, c) = queue::spsc::new(MESSAGES);
+    let (p, c) = RingBuffer::new(MESSAGES).split();
 
-    crossbeam::scope(|scope| {
+    scope(|scope| {
         scope.spawn(move |_| {
             for i in 0..MESSAGES {
                 p.push(message::new(i)).unwrap();
@@ -51,7 +51,7 @@ fn main() {
             println!(
                 "{:25} {:15} {:7.3} sec",
                 $name,
-                "Rust spsc",
+                "rtrb",
                 elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9
             );
         };
