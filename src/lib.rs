@@ -498,8 +498,49 @@ impl<T> Consumer<T> {
     /// This does *not* advance the read position.
     ///
     /// If not enough slots are available for reading, an error is returned.
-    pub fn peek_slices(&self, _n: usize) -> Result<PeekSlices, SlicesError> {
-        unimplemented!();
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rtrb::{RingBuffer, SlicesError};
+    ///
+    /// let (mut p, c) = RingBuffer::new(2).split();
+    ///
+    /// assert_eq!(c.peek_slices(1), Err(SlicesError::TooFewSlots(0)));
+    /// assert_eq!(p.push(10), Ok(()));
+    /// assert_eq!(c.peek_slices(99), Err(SlicesError::TooFewSlots(1)));
+    /// assert_eq!(p.push(20), Ok(()));
+    ///
+    /// if let Ok(slices) = c.peek_slices(2) {
+    ///     assert_eq!(slices.first, [10, 20].as_ref());
+    ///     assert_eq!(slices.second, [].as_ref());
+    /// } else {
+    ///     unreachable!();
+    /// }
+    ///
+    /// //c.advance(1);
+    /// //assert_eq!(p.push(30), Ok(()));
+    /// //assert_eq!(c.as_slices(2), Ok(([20].as_ref(), [30].as_ref())));
+    /// //assert_eq!(c.as_slices(0), Ok(([].as_ref(), [].as_ref())));
+    /// ```
+    pub fn peek_slices(&self, n: usize) -> Result<PeekSlices<'_, T>, SlicesError> {
+        let head = match self.get_head(n) {
+            Ok(head) => head,
+            Err(slots) => return Err(SlicesError::TooFewSlots(slots)),
+        };
+
+        // TODO: helper function collapse_position()?
+
+        let buffer_remainder = if head < self.rb.capacity {
+            self.rb.capacity - head
+        } else {
+            2 * self.rb.capacity - head
+        };
+        let first_len = n.min(buffer_remainder);
+        Ok(PeekSlices {
+            first: unsafe { std::slice::from_raw_parts(self.rb.slot(head), first_len) },
+            second: unsafe { std::slice::from_raw_parts(self.rb.slot(0), n - first_len) },
+        })
     }
 
     /// Returns slices for `n` slots, drops their contents when done and advances read position.
@@ -567,7 +608,17 @@ where
 }
 
 /// Contains two slices from the ring buffer.
-pub struct PeekSlices {}
+#[derive(Debug, PartialEq, Eq)]
+pub struct PeekSlices<'a, T> {
+    /// First part of the requested slots.
+    ///
+    /// Can only be empty if `0` slots have been requested.
+    pub first: &'a [T],
+    /// Second part of the requested slots.
+    ///
+    /// If `first` contains all requested slots, this is empty.
+    pub second: &'a [T],
+}
 
 /// Contains two slices from the ring buffer. When this structure is dropped (falls out of scope),
 /// the contents of the slices will be dropped and the read position will be advanced.
