@@ -485,7 +485,7 @@ impl<T> Consumer<T> {
     /// # Examples
     ///
     /// ```
-    /// use rtrb::{RingBuffer, SlicesError};
+    /// use rtrb::RingBuffer;
     ///
     /// static mut DROPS: i32 = 0;
     ///
@@ -498,22 +498,32 @@ impl<T> Consumer<T> {
     /// {
     ///     let (mut p, mut c) = RingBuffer::new(2).split();
     ///
-    ///     assert!(p.push(Thing).is_ok());
-    ///     assert_eq!(c.drop_slices(2).unwrap_err(), SlicesError::TooFewSlots(1));
-    ///     assert!(p.push(Thing).is_ok());
+    ///     assert!(p.push(Thing).is_ok()); // 1
+    ///     assert!(p.push(Thing).is_ok()); // 2
+    ///     if let Ok(thing) = c.pop() {
+    ///         // "thing" has been *moved* out of the queue
+    ///         assert_eq!(unsafe { DROPS }, 0);
+    ///     } else {
+    ///         unreachable!();
+    ///     }
+    ///     // First Thing has been dropped when "thing" went out of scope:
+    ///     assert_eq!(unsafe { DROPS }, 1);
+    ///     assert!(p.push(Thing).is_ok()); // 3
     ///
     ///     if let Ok(slices) = c.drop_slices(2) {
-    ///         assert_eq!(slices.first.len(), 2);
-    ///         assert_eq!(slices.second.len(), 0);
+    ///         // The requested two Things haven't been dropped yet:
+    ///         assert_eq!(unsafe { DROPS }, 1);
+    ///         assert_eq!(slices.first.len(), 1);
+    ///         assert_eq!(slices.second.len(), 1);
     ///     } else {
     ///         unreachable!();
     ///     }
     ///     // Two Things have been dropped when "slices" went out of scope:
-    ///     assert_eq!(unsafe { DROPS }, 2);
-    ///     assert!(p.push(Thing).is_ok());
+    ///     assert_eq!(unsafe { DROPS }, 3);
+    ///     assert!(p.push(Thing).is_ok()); // 4
     /// }
     /// // Last Thing has been dropped when ring buffer went out of scope:
-    /// assert_eq!(unsafe { DROPS }, 3);
+    /// assert_eq!(unsafe { DROPS }, 4);
     /// ```
     pub fn drop_slices(&mut self, n: usize) -> Result<DropSlices<'_, T>, SlicesError> {
         let (first, second) = self.slices(n)?;
