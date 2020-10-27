@@ -511,10 +511,10 @@ impl<T> Consumer<T> {
     ///     assert!(p.push(Thing).is_ok()); // 3
     ///
     ///     if let Ok(slices) = c.drop_slices(2) {
-    ///         // The requested two Things haven't been dropped yet:
-    ///         assert_eq!(unsafe { DROPS }, 1);
     ///         assert_eq!(slices.first.len(), 1);
     ///         assert_eq!(slices.second.len(), 1);
+    ///         // The requested two Things haven't been dropped yet:
+    ///         assert_eq!(unsafe { DROPS }, 1);
     ///     } else {
     ///         unreachable!();
     ///     }
@@ -754,6 +754,14 @@ impl<'a, T> Drop for DropSlices<'a, T> {
 }
 
 impl<'a, T> IntoIterator for PeekSlices<'a, T> {
+    type Item = &'a T;
+    type IntoIter = std::iter::Chain<std::slice::Iter<'a, T>, std::slice::Iter<'a, T>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.first.iter().chain(self.second)
+    }
+}
+
+impl<'a, T> IntoIterator for DropSlices<'a, T> {
     type Item = &'a T;
     type IntoIter = std::iter::Chain<std::slice::Iter<'a, T>, std::slice::Iter<'a, T>>;
     fn into_iter(self) -> Self::IntoIter {
