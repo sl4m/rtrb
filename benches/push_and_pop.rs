@@ -1,12 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, Criterion};
 use rtrb::RingBuffer;
 
-pub fn criterion_benchmark(criterion: &mut Criterion) {
-    criterion.bench_function("push and pop Vec", |b| {
+pub fn push_and_pop(criterion: &mut Criterion) {
+    criterion.bench_function("push-pop Vec", |b| {
         let mut v = Vec::with_capacity(1);
         let mut i: u8 = 0;
         b.iter(|| {
@@ -16,7 +15,7 @@ pub fn criterion_benchmark(criterion: &mut Criterion) {
         })
     });
 
-    criterion.bench_function("push and pop 1-element RingBuffer", |b| {
+    criterion.bench_function("push-pop RingBuffer", |b| {
         let (p, c) = RingBuffer::new(1).split();
         let mut i: u8 = 0;
         b.iter(|| {
@@ -26,31 +25,27 @@ pub fn criterion_benchmark(criterion: &mut Criterion) {
         })
     });
 
-    criterion.bench_function("echo thread", |b| {
+    criterion.bench_function("push-pop via thread", |b| {
         let (p1, c1) = RingBuffer::new(1).split();
         let (p2, c2) = RingBuffer::new(1).split();
         let keep_thread_running = Arc::new(AtomicBool::new(true));
         let keep_running = Arc::clone(&keep_thread_running);
 
-        let echo_thread = thread::spawn(move || {
+        let echo_thread = std::thread::spawn(move || {
             while keep_running.load(Ordering::Acquire) {
-                match c1.pop() {
+                if let Ok(x) = c1.pop() {
                     // NB: return channel will always be ready
-                    Ok(x) => p2.push(x).unwrap(),
-                    Err(_) => thread::yield_now(),
+                    p2.push(x).unwrap();
                 }
             }
         });
 
         let mut i: u8 = 0;
         let result = b.iter(|| {
-            while p1.push(black_box(i)).is_err() {
-                thread::yield_now();
-            }
+            while p1.push(black_box(i)).is_err() {}
             let x = loop {
-                match c2.pop() {
-                    Ok(x) => break x,
-                    Err(_) => thread::yield_now(),
+                if let Ok(x) = c2.pop() {
+                    break x;
                 }
             };
             assert_eq!(x, black_box(i));
@@ -62,6 +57,3 @@ pub fn criterion_benchmark(criterion: &mut Criterion) {
         result
     });
 }
-
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
