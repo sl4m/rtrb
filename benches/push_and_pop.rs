@@ -1,13 +1,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 
 use criterion::{black_box, Criterion};
 use rtrb::RingBuffer;
 
+const MANY: usize = 5_000_000;
+
 pub fn push_and_pop(criterion: &mut Criterion) {
     criterion.bench_function("push-pop Vec", |b| {
-        let mut v = Vec::with_capacity(1);
-        let mut i: u8 = 0;
+        let mut v = Vec::<u8>::with_capacity(1);
+        let mut i = 0;
         b.iter(|| {
             v.push(black_box(i));
             assert_eq!(v.pop(), black_box(Some(i)));
@@ -16,8 +18,8 @@ pub fn push_and_pop(criterion: &mut Criterion) {
     });
 
     criterion.bench_function("push-pop RingBuffer", |b| {
-        let (p, c) = RingBuffer::new(1).split();
-        let mut i: u8 = 0;
+        let (p, c) = RingBuffer::<u8>::new(1).split();
+        let mut i = 0;
         b.iter(|| {
             p.push(black_box(i)).unwrap();
             assert_eq!(c.pop(), black_box(Ok(i)));
@@ -26,8 +28,8 @@ pub fn push_and_pop(criterion: &mut Criterion) {
     });
 
     criterion.bench_function("push-pop via thread", |b| {
-        let (p1, c1) = RingBuffer::new(1).split();
-        let (p2, c2) = RingBuffer::new(1).split();
+        let (p1, c1) = RingBuffer::<u8>::new(1).split();
+        let (p2, c2) = RingBuffer::<u8>::new(1).split();
         let keep_thread_running = Arc::new(AtomicBool::new(true));
         let keep_running = Arc::clone(&keep_thread_running);
 
@@ -40,7 +42,7 @@ pub fn push_and_pop(criterion: &mut Criterion) {
             }
         });
 
-        let mut i: u8 = 0;
+        let mut i = 0;
         let result = b.iter(|| {
             while p1.push(black_box(i)).is_err() {}
             let x = loop {
@@ -56,4 +58,70 @@ pub fn push_and_pop(criterion: &mut Criterion) {
         echo_thread.join().unwrap();
         result
     });
+
+    criterion.bench_function("push-many-pop-many", |b| {
+        let (p, c) = RingBuffer::<u8>::new(MANY).split();
+        b.iter(|| {
+            for i in 0..MANY {
+                p.push(black_box(wrap(i))).unwrap();
+            }
+            for i in 0..MANY {
+                assert_eq!(c.pop(), Ok(black_box(wrap(i))));
+            }
+        })
+    });
+
+    criterion.bench_function("push-many-in-thread-pop-many", |b| {
+        let (p, c) = RingBuffer::<u8>::new(MANY).split();
+
+        enum Condition {
+            Wait,
+            Continue,
+            Finish,
+        }
+
+        let pair = Arc::new((Mutex::new(Condition::Wait), Condvar::new()));
+        let pair2 = pair.clone();
+
+        let push_thread = std::thread::spawn(move || {
+            let (lock, cvar) = &*pair2;
+            loop {
+                let mut condition = cvar
+                    .wait_while(lock.lock().unwrap(), |c| matches!(*c, Condition::Wait))
+                    .unwrap();
+                *condition = match *condition {
+                    Condition::Finish => break,
+                    Condition::Continue => Condition::Wait,
+                    Condition::Wait => unreachable!(),
+                };
+                for i in 0..MANY {
+                    p.push(black_box(wrap(i))).unwrap();
+                }
+            }
+        });
+
+        let (lock, cvar) = &*pair;
+        let result = b.iter(|| {
+            *lock.lock().unwrap() = Condition::Continue;
+            cvar.notify_one();
+            // Wait a bit to get more consistent timing
+            std::thread::sleep(std::time::Duration::from_millis(3));
+            for i in 0..MANY {
+                loop {
+                    if let Ok(value) = c.pop() {
+                        assert_eq!(value, black_box(wrap(i)));
+                        break;
+                    }
+                }
+            }
+        });
+        *lock.lock().unwrap() = Condition::Finish;
+        cvar.notify_one();
+        push_thread.join().unwrap();
+        result
+    });
+}
+
+fn wrap(n: usize) -> u8 {
+    (n % u8::MAX as usize) as u8
 }
