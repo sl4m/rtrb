@@ -296,6 +296,7 @@ impl<T> Producer<T> {
     }
 
     /// Returns tail position on success, available slots on error.
+    #[inline]
     fn get_tail(&self, n: usize) -> Result<usize, usize> {
         let head = self.head.get();
         let tail = self.tail.get();
@@ -315,6 +316,7 @@ impl<T> Producer<T> {
         Ok(tail)
     }
 
+    #[inline]
     fn advance_tail(&mut self, tail: usize, n: usize) {
         let tail = self.rb.increment(tail, n);
         self.rb.tail.store(tail, Ordering::Release);
@@ -549,6 +551,7 @@ impl<T> Consumer<T> {
     }
 
     /// Returns head position on success, available slots on error.
+    #[inline]
     fn get_head(&self, n: usize) -> Result<usize, usize> {
         let head = self.head.get();
         let tail = self.tail.get();
@@ -568,6 +571,7 @@ impl<T> Consumer<T> {
         Ok(head)
     }
 
+    #[inline]
     fn advance_head(&self, head: usize, n: usize) {
         let head = self.rb.increment(head, n);
         self.rb.head.store(head, Ordering::Release);
