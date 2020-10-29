@@ -6,33 +6,23 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rtrb::RingBuffer;
 
 pub fn criterion_benchmark(criterion: &mut Criterion) {
-    criterion.bench_function("write and read boxed variable", |b| {
-        let mut v = Box::new(666);
-        let mut i: usize = 0;
-        b.iter(|| {
-            *v = black_box(i);
-            assert_eq!(*v, black_box(i));
-            i += black_box(1);
-        })
-    });
-
     criterion.bench_function("push and pop Vec", |b| {
         let mut v = Vec::with_capacity(1);
-        let mut i: usize = 0;
+        let mut i: u8 = 0;
         b.iter(|| {
             v.push(black_box(i));
             assert_eq!(v.pop(), black_box(Some(i)));
-            i += black_box(1);
+            i = i.wrapping_add(black_box(1));
         })
     });
 
     criterion.bench_function("push and pop 1-element RingBuffer", |b| {
         let (p, c) = RingBuffer::new(1).split();
-        let mut i: usize = 0;
+        let mut i: u8 = 0;
         b.iter(|| {
             p.push(black_box(i)).unwrap();
             assert_eq!(c.pop(), black_box(Ok(i)));
-            i += black_box(1);
+            i = i.wrapping_add(black_box(1));
         })
     });
 
@@ -52,7 +42,7 @@ pub fn criterion_benchmark(criterion: &mut Criterion) {
             }
         });
 
-        let mut i: usize = 0;
+        let mut i: u8 = 0;
         let result = b.iter(|| {
             while p1.push(black_box(i)).is_err() {
                 thread::yield_now();
@@ -64,7 +54,7 @@ pub fn criterion_benchmark(criterion: &mut Criterion) {
                 }
             };
             assert_eq!(x, black_box(i));
-            i += black_box(1);
+            i = i.wrapping_add(black_box(1));
         });
 
         keep_thread_running.store(false, Ordering::Release);
