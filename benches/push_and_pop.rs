@@ -1,12 +1,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
-use criterion::{black_box, Criterion};
+use criterion::black_box;
 use rtrb::RingBuffer;
 
-const MANY: usize = 5_000_000;
+const MANY: usize = 2_000_000;
+const SLEEPTIME: Duration = Duration::from_millis(3);
 
-pub fn push_and_pop(criterion: &mut Criterion) {
+pub fn push_and_pop(criterion: &mut criterion::Criterion) {
     criterion.bench_function("push-pop Vec", |b| {
         let mut v = Vec::<u8>::with_capacity(1);
         let mut i = 0;
@@ -59,7 +61,11 @@ pub fn push_and_pop(criterion: &mut Criterion) {
         result
     });
 
-    criterion.bench_function("push-many-pop-many", |b| {
+    let mut group = criterion.benchmark_group("many-items");
+    group.sample_size(30);
+    group.sampling_mode(criterion::SamplingMode::Flat);
+
+    group.bench_function("push-many-pop-many", |b| {
         let (p, c) = RingBuffer::<u8>::new(MANY).split();
         b.iter(|| {
             for i in 0..MANY {
@@ -71,7 +77,7 @@ pub fn push_and_pop(criterion: &mut Criterion) {
         })
     });
 
-    criterion.bench_function("push-many-in-thread-pop-many", |b| {
+    group.bench_function("parallel-push-pop", |b| {
         let (p, c) = RingBuffer::<u8>::new(MANY).split();
 
         enum Condition {
@@ -105,7 +111,7 @@ pub fn push_and_pop(criterion: &mut Criterion) {
             *lock.lock().unwrap() = Condition::Continue;
             cvar.notify_one();
             // Wait a bit to get more consistent timing
-            std::thread::sleep(std::time::Duration::from_millis(3));
+            std::thread::sleep(SLEEPTIME);
             for i in 0..MANY {
                 loop {
                     if let Ok(value) = c.pop() {
@@ -120,6 +126,8 @@ pub fn push_and_pop(criterion: &mut Criterion) {
         push_thread.join().unwrap();
         result
     });
+
+    group.finish();
 }
 
 fn wrap(n: usize) -> u8 {
