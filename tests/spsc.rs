@@ -1,16 +1,16 @@
-extern crate crossbeam_queue;
 extern crate crossbeam_utils;
 extern crate rand;
+extern crate rtrb;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crossbeam_queue::spsc;
 use crossbeam_utils::thread::scope;
 use rand::{thread_rng, Rng};
+use rtrb::Spsc;
 
 #[test]
 fn smoke() {
-    let (p, c) = spsc::new(1);
+    let (p, c) = Spsc::new(1);
 
     p.push(7).unwrap();
     assert_eq!(c.pop(), Ok(7));
@@ -23,7 +23,7 @@ fn smoke() {
 #[test]
 fn capacity() {
     for i in 1..10 {
-        let (p, c) = spsc::new::<i32>(i);
+        let (p, c) = Spsc::new::<i32>(i);
         assert_eq!(p.capacity(), i);
         assert_eq!(c.capacity(), i);
     }
@@ -32,14 +32,14 @@ fn capacity() {
 #[test]
 #[should_panic(expected = "capacity must be non-zero")]
 fn zero_capacity() {
-    let _ = spsc::new::<i32>(0);
+    let _ = Spsc::new::<i32>(0);
 }
 
 #[test]
 fn parallel() {
     const COUNT: usize = 100_000;
 
-    let (p, c) = spsc::new(3);
+    let (p, c) = Spsc::new(3);
 
     scope(|s| {
         s.spawn(move |_| {
@@ -85,7 +85,7 @@ fn drops() {
         let additional = rng.gen_range(0, 50);
 
         DROPS.store(0, Ordering::SeqCst);
-        let (p, c) = spsc::new(50);
+        let (p, c) = Spsc::new(50);
 
         let p = scope(|s| {
             s.spawn(move |_| {

@@ -3,9 +3,9 @@
 //! # Examples
 //!
 //! ```
-//! use crossbeam_queue::spsc;
+//! use rtrb::Spsc;
 //!
-//! let (p, c) = spsc::new(2);
+//! let (p, c) = Spsc::new(2);
 //!
 //! assert!(p.push(1).is_ok());
 //! assert!(p.push(2).is_ok());
@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use crossbeam_utils::CachePadded;
 
-use err::{PopError, PushError};
+use crate::err::{PopError, PushError};
 
 /// The inner representation of a single-producer single-consumer queue.
 struct Inner<T> {
@@ -118,42 +118,46 @@ impl<T> Drop for Inner<T> {
 /// # Examples
 ///
 /// ```
-/// use crossbeam_queue::spsc;
+/// use rtrb::Spsc;
 ///
-/// let (p, c) = spsc::new::<i32>(100);
+/// let (p, c) = Spsc::new::<i32>(100);
 /// ```
-pub fn new<T>(cap: usize) -> (Producer<T>, Consumer<T>) {
-    assert!(cap > 0, "capacity must be non-zero");
+pub struct Spsc {}
 
-    // Allocate a buffer of length `cap`.
-    let buffer = {
-        let mut v = Vec::<T>::with_capacity(cap);
-        let ptr = v.as_mut_ptr();
-        mem::forget(v);
-        ptr
-    };
+impl Spsc {
+    pub fn new<T>(cap: usize) -> (Producer<T>, Consumer<T>) {
+        assert!(cap > 0, "capacity must be non-zero");
 
-    let inner = Arc::new(Inner {
-        head: CachePadded::new(AtomicUsize::new(0)),
-        tail: CachePadded::new(AtomicUsize::new(0)),
-        buffer,
-        cap,
-        _marker: PhantomData,
-    });
+        // Allocate a buffer of length `cap`.
+        let buffer = {
+            let mut v = Vec::<T>::with_capacity(cap);
+            let ptr = v.as_mut_ptr();
+            mem::forget(v);
+            ptr
+        };
 
-    let p = Producer {
-        inner: inner.clone(),
-        head: Cell::new(0),
-        tail: Cell::new(0),
-    };
+        let inner = Arc::new(Inner {
+            head: CachePadded::new(AtomicUsize::new(0)),
+            tail: CachePadded::new(AtomicUsize::new(0)),
+            buffer,
+            cap,
+            _marker: PhantomData,
+        });
 
-    let c = Consumer {
-        inner,
-        head: Cell::new(0),
-        tail: Cell::new(0),
-    };
+        let p = Producer {
+            inner: inner.clone(),
+            head: Cell::new(0),
+            tail: Cell::new(0),
+        };
 
-    (p, c)
+        let c = Consumer {
+            inner,
+            head: Cell::new(0),
+            tail: Cell::new(0),
+        };
+
+        (p, c)
+    }
 }
 
 /// The producer side of a bounded single-producer single-consumer queue.
@@ -161,9 +165,9 @@ pub fn new<T>(cap: usize) -> (Producer<T>, Consumer<T>) {
 /// # Examples
 ///
 /// ```
-/// use crossbeam_queue::{spsc, PushError};
+/// use rtrb::{PushError, Spsc};
 ///
-/// let (p, c) = spsc::new::<i32>(1);
+/// let (p, c) = Spsc::new::<i32>(1);
 ///
 /// assert_eq!(p.push(10), Ok(()));
 /// assert_eq!(p.push(20), Err(PushError(20)));
@@ -193,9 +197,9 @@ impl<T> Producer<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::{spsc, PushError};
+    /// use rtrb::{PushError, Spsc};
     ///
-    /// let (p, c) = spsc::new(1);
+    /// let (p, c) = Spsc::new(1);
     ///
     /// assert_eq!(p.push(10), Ok(()));
     /// assert_eq!(p.push(20), Err(PushError(20)));
@@ -234,9 +238,9 @@ impl<T> Producer<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::spsc;
+    /// use rtrb::Spsc;
     ///
-    /// let (p, c) = spsc::new::<i32>(100);
+    /// let (p, c) = Spsc::new::<i32>(100);
     ///
     /// assert_eq!(p.capacity(), 100);
     /// ```
@@ -256,9 +260,9 @@ impl<T> fmt::Debug for Producer<T> {
 /// # Examples
 ///
 /// ```
-/// use crossbeam_queue::{spsc, PopError};
+/// use rtrb::{PopError, Spsc};
 ///
-/// let (p, c) = spsc::new(1);
+/// let (p, c) = Spsc::new(1);
 /// assert_eq!(p.push(10), Ok(()));
 ///
 /// assert_eq!(c.pop(), Ok(10));
@@ -289,9 +293,9 @@ impl<T> Consumer<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::{spsc, PopError};
+    /// use rtrb::{PopError, Spsc};
     ///
-    /// let (p, c) = spsc::new(1);
+    /// let (p, c) = Spsc::new(1);
     /// assert_eq!(p.push(10), Ok(()));
     ///
     /// assert_eq!(c.pop(), Ok(10));
@@ -329,9 +333,9 @@ impl<T> Consumer<T> {
     /// # Examples
     ///
     /// ```
-    /// use crossbeam_queue::spsc;
+    /// use rtrb::Spsc;
     ///
-    /// let (p, c) = spsc::new::<i32>(100);
+    /// let (p, c) = Spsc::new::<i32>(100);
     ///
     /// assert_eq!(c.capacity(), 100);
     /// ```
